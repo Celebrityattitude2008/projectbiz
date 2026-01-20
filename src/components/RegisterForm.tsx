@@ -1,177 +1,121 @@
-'use client'
-
-import React, { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { signUpUser, updateUserProfile } from '@/lib/clientAuth'
+"use client";
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 
 export function RegisterForm() {
-  const router = useRouter()
-  const [step, setStep] = useState(1)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
   const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    full_name: '',
-    job_title: '',
-    bio: '',
-    skills: '',
-  })
+    full_name: "",
+    phone_number: "",
+    job_title: "",
+    bio_description: "",
+  });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target
-    setFormData((prev: typeof formData) => ({ ...prev, [name]: value }))
-  }
+  useEffect(() => {
+    async function loadProfile() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+        if (data) {
+          setFormData({
+            full_name: data.full_name || "",
+            phone_number: data.phone_number || "",
+            job_title: data.job_title || "",
+            bio_description: data.bio_description || "",
+          });
+        }
+      }
+    }
+    loadProfile();
+  }, []);
 
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
 
     try {
-      const { data, error: authError } = await signUpUser(formData.email, formData.password)
-      if (authError) throw authError
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Authentication failed");
 
-      // Move to step 2 (profile)
-      setStep(2)
+      let resumeUrl = "";
+      if (file) {
+        const filePath = `resumes/${user.id}-${Date.now()}.pdf`;
+        const { error: uploadError } = await supabase.storage.from("resumes").upload(filePath, file);
+        if (uploadError) throw uploadError;
+        const { data } = supabase.storage.from("resumes").getPublicUrl(filePath);
+        resumeUrl = data.publicUrl;
+      }
+
+      const { error } = await supabase.from("profiles").upsert({
+        id: user.id,
+        ...formData,
+        ...(resumeUrl && { resume_url: resumeUrl }),
+        status: "approved",
+      });
+
+      if (error) throw error;
+      router.push("/dashboard");
     } catch (err: any) {
-      setError(err.message || 'Sign up failed')
+      alert(err.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
-
-  const handleProfileSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
-
-    try {
-      await updateUserProfile({
-        full_name: formData.full_name,
-        job_title: formData.job_title,
-        bio: formData.bio,
-        skills: formData.skills,
-      })
-
-      // Redirect to dashboard
-      router.push('/dashboard')
-    } catch (err: any) {
-      setError(err.message || 'Failed to save profile')
-    } finally {
-      setLoading(false)
-    }
-  }
+  };
 
   return (
-    <div className="max-w-md mx-auto bg-white p-8 rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold mb-6">
-        {step === 1 ? 'Create Account' : 'Complete Profile'}
-      </h2>
+    <div className="max-w-2xl mx-auto py-8 px-4">
+      <button onClick={() => router.push('/dashboard')} className="mb-6 text-gray-500 hover:text-blue-600 transition flex items-center gap-2 font-medium">
+        ← Back to Dashboard
+      </button>
 
-      {error && (
-        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">
-          {error}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="bg-gray-50 p-8 border-b border-gray-100">
+          <h2 className="text-2xl font-bold text-gray-900">Professional Profile</h2>
+          <p className="text-gray-500 text-sm">Update your details to stay visible in the directory.</p>
         </div>
-      )}
 
-      {step === 1 && (
-        <form onSubmit={handleSignUp} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-            <input
-              type="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
-              placeholder="you@example.com"
-            />
+        <form onSubmit={handleSubmit} className="p-8 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-400 uppercase tracking-tighter">Full Name</label>
+              <input type="text" value={formData.full_name} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" 
+                onChange={(e) => setFormData({...formData, full_name: e.target.value})} required />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-400 uppercase tracking-tighter">Job Title</label>
+              <input type="text" value={formData.job_title} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                onChange={(e) => setFormData({...formData, job_title: e.target.value})} required />
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <input
-              type="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
-              placeholder="••••••••"
-            />
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-gray-400 uppercase tracking-tighter">Phone Number</label>
+            <input type="text" value={formData.phone_number} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+              onChange={(e) => setFormData({...formData, phone_number: e.target.value})} />
           </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-primary text-white py-2 rounded-lg hover:bg-secondary disabled:bg-gray-400"
-          >
-            {loading ? 'Creating account...' : 'Next'}
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-gray-400 uppercase tracking-tighter">Bio / Skills</label>
+            <textarea value={formData.bio_description} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl h-32 resize-none focus:ring-2 focus:ring-blue-500 outline-none"
+              onChange={(e) => setFormData({...formData, bio_description: e.target.value})} />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-gray-400 uppercase tracking-tighter">Resume (PDF)</label>
+            <div className="border-2 border-dashed border-gray-100 rounded-xl p-4 text-center hover:border-blue-200 transition">
+              <input type="file" accept=".pdf" className="w-full text-sm text-gray-500"
+                onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            </div>
+          </div>
+
+          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-100 transform active:scale-[0.98]">
+            {loading ? "Saving Changes..." : "Update Professional Profile"}
           </button>
         </form>
-      )}
-
-      {step === 2 && (
-        <form onSubmit={handleProfileSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-            <input
-              type="text"
-              name="full_name"
-              value={formData.full_name}
-              onChange={handleChange}
-              required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
-            <input
-              type="text"
-              name="job_title"
-              value={formData.job_title}
-              onChange={handleChange}
-              required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
-            <textarea
-              name="bio"
-              value={formData.bio}
-              onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
-              rows={3}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Skills</label>
-            <textarea
-              name="skills"
-              value={formData.skills}
-              onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
-              rows={3}
-              placeholder="e.g., JavaScript, React, Node.js (comma-separated)"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-primary text-white py-2 rounded-lg hover:bg-secondary disabled:bg-gray-400"
-          >
-            {loading ? 'Saving...' : 'Complete Profile'}
-          </button>
-          <Link
-            href="/dashboard"
-            className="w-full block text-center bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400"
-          >
-            Go to Homepage
-          </Link>
-        </form>
-      )}
+      </div>
     </div>
-  )
+  );
 }
